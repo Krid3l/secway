@@ -42,21 +42,18 @@ struct FileHandler {
     // [row][cell]
     string[][] fileContents;
 
-    // That's a nasty long member function. I should delocalize pieces of it at
+    // That member function is a tad long. I should delocalize pieces of it at
     //  program scope; that would allow to better track the control flow too.
-    void tokenize(ref FileInfo loadedFileInfo) {
+    void parseContents(ref FileInfo loadedFileInfo) {
         string csvFileTokens;
         string buf_cell = "";
-        ulong buf_lineLen = 0;
         auto fileToDissect = File(loadedFileInfo.filename, "r");
         auto lineRange = fileToDissect.byLine();
         uint lineNumber = 0;
+        ulong primalCellCount = 0;
         // ___ File layer ___
         foreach (line; lineRange) {
-            // ___ Line layer ___
-            // For some reason accessing line.length gives us the number of
-            //  characters in the line sans the spaces and commas
-            buf_lineLen = line.length;           
+            // ___ Line layer ___         
             // Only validated rows are counted.
             // This also prevents adding empty rows just behind EOF to the
             //  file count.
@@ -69,7 +66,22 @@ struct FileHandler {
                 // Extending the dynamic 2d array for proper later access
                 fileContents.length++;
             }
-            foreach (cellIndex, cellContent; std.string.split(line, ",")) {
+            
+            auto cellsFromRow = std.string.split(line, ",");
+            if (primalCellCount <= 0) {
+                primalCellCount = cellsFromRow.length;
+            } else if (primalCellCount != cellsFromRow.length) {
+                // IETF RFC 4180 compliance
+                writeln("[ERROR] The provided CSV file does not have the same number of cells on every row.\n"
+                    ~ "        Line " ~ to!string(loadedFileInfo.rowCount + 1)
+                    ~ " has " ~ to!string(cellsFromRow.length)
+                    ~ " cells, comapred to the previously-detected count of " ~ to!string(primalCellCount)
+                    ~ " per row.\nExiting..."
+                );
+                exit(1);
+            }
+            // Sweep the row's cells into the newly-created 2nd-level array slot
+            foreach (cellIndex, cellContent; cellsFromRow) {
                 fileContents[lineNumber] ~= to!string(cellContent);
                 loadedFileInfo.cellCount++;
                 loadedFileInfo.charCount += cellContent.length;
@@ -98,8 +110,8 @@ void validateArgs(string[] args, ref FileInfo loadedFileInfo, ref string task) {
     ];
 
     auto headerArgValues = [
-        "yes": ["yes", "y", "true"],
-        "no": ["no", "n", "false"]
+        "yes": ["yes", "y", "true", "yeah", "aye", "oui"],
+        "no": ["no", "n", "false", "nope", "nah", "non"]
     ];
 
     auto csvFileRegex = (r"^.*\.(csv)");
@@ -128,22 +140,23 @@ void validateArgs(string[] args, ref FileInfo loadedFileInfo, ref string task) {
     );
     
     if (!possibleTasks.canFind(task)) {
-        writeln("[WARN] Provided task argument is not valid." ~
-            "\n>>>>>> Reverting secway to free mode."
+        writeln("[WARN] Provided task argument is "
+            ~ (task == "" ? "empty" : "invalid") ~ "." 
+            ~ "\n>>>>>> Reverting secway to free mode."
         );
         task = "";
     }
 
     if (headerArg == "") {
-        writeln("[INFO] No header argument provided." ~
-            "\n>>>>>> Secway will assume there's no header in the file."
+        writeln("[INFO] No header argument provided."
+            ~ "\n>>>>>> Secway will assume there's no header in the file."
         );
     } else if (headerArgValues["yes"].canFind(headerArg)) {
         loadedFileInfo.headersInFile = true;
     } else {
         if (!headerArgValues["no"].canFind(headerArg)) {
-            writeln("[WARN] The provided header argument is invalid." ~
-                "\n>>>>>> Secway will assume there's no header in the file."
+            writeln("[WARN] The provided header argument is invalid."
+                ~ "\n>>>>>> Secway will assume there's no header in the file."
             );
         }
     }
@@ -153,8 +166,8 @@ void validateArgs(string[] args, ref FileInfo loadedFileInfo, ref string task) {
 void validateFile(ref FileInfo loadedFileInfo, FileHandler fileHandler) {
     // Deliberately, I won't pass a file pointer throught the whole of Secway.
     // Instead, I'm just going to open and close the CSV file only when
-    //  operations ought to be performed. (e.g. in FileHandler.tokenize())
-    fileHandler.tokenize(loadedFileInfo);
+    //  operations ought to be performed. (e.g. in FileHandler.parseContents())
+    fileHandler.parseContents(loadedFileInfo);
 
     writeln("\n  Info about " ~ loadedFileInfo.filename ~ ":\n"
         ~ "\n  Character count (excluding separators and CL/RFs)\n> " ~ to!string(loadedFileInfo.charCount)
@@ -162,11 +175,6 @@ void validateFile(ref FileInfo loadedFileInfo, FileHandler fileHandler) {
         ~ "\n  Row count\n> " ~ to!string(loadedFileInfo.rowCount)
         ~ "\n  Headers? (user-specified)\n> " ~ (loadedFileInfo.headersInFile ? "yes" : "no")
     );
-    /*
-    foreach (lineCur; fileHandler.fileContents) {
-        writeln(lineCur);
-    }
-    */
 }
 
 void main(string[] args) {
