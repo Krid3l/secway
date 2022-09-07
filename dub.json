@@ -1,0 +1,10 @@
+{
+	"authors": [
+		"Kridel"
+	],
+	"copyright": "Copyright (C) 2022, Sulcata Studio",
+	"description": "Stupid but Employable CSV Wrangler, Editor and Yanker.",
+	"license": "MIT",
+	"name": "secwey",
+	"targetType": "executable"
+}
