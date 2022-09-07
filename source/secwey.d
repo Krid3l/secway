@@ -191,7 +191,6 @@ void validateFile(ref FileInfo loadedFileInfo, ref FileHandler fileHandler) {
 // Integer helper: When you need a helping hand!
 // Be careful to feed the input stripped of CR/LFs
 string isUserInputNumeric(char[] input) {
-    // Input has the expected value but isNumeric() always returns false? WTF?
     if (std.string.isNumeric(to!string(input))) {
         int numInput = to!int(input);
         writeln(numInput);
