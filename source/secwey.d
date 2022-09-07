@@ -153,9 +153,9 @@ void validateArgs(string[] args, ref FileInfo loadedFileInfo, ref string task) {
     if (!taskIsValid) {
         writeln("[WARN] Provided task argument is "
             ~ (task == "" ? "empty" : "invalid") ~ "." 
-            ~ "\n>>>>>> Reverting secway to free mode."
+            ~ "\n>>>>>> Reverting secway to read mode."
         );
-        task = "";
+        task = "read";
     }
 
     if (headerArg == "") {
