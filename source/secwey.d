@@ -21,6 +21,7 @@
  * > Single-file, less than 1k SLOC
  * > Compromise between code clarity and performance
  * > Use nothing but Dlang's stdlib (exclusing std.csv as per contest rules)
+ * > Do every data-altering operation on the buffer, save on program exit only
  */
 
 module secwey;
@@ -52,7 +53,7 @@ void displayHelp() {
         ~ "|   To be implemented.            |\n"
         ~ "H r - read                        H\n"
         ~ "|   Displays the contents of a    |\n"
-        ~ "H   cell or row without touching  H\n"
+        ~ "H   cell or row without altering  H\n"
         ~ "|   any data in the file buffer.  |\n"
         ~ "H u - update                      H\n"
         ~ "|   To be implemented.            |\n"
@@ -69,6 +70,7 @@ void displayHelp() {
 struct FileHandler {
     // [row][cell]
     string[][] fileContents;
+    bool dataAltered;
 
     // That member function is a tad long. I should delocalize pieces of it at
     //  program scope; that would allow to better track the control flow too.
@@ -116,6 +118,12 @@ struct FileHandler {
             }
             loadedFileInfo.rowCount++;
         }
+
+        // Store the number of expected cells per row to avoid re-computing it
+        loadedFileInfo.cellsPerRow = primalCellCount;
+
+        // The file's contents have only been read; they're not yet modified
+        dataAltered = false;
     }
 }
 
@@ -124,17 +132,18 @@ struct FileInfo {
     int cellCount       = 0;
     int rowCount        = 0;
     int charCount       = 0;
+    ulong cellsPerRow   = 0;
     bool headerInFile   = false;
 }
 
 string validateTask(ref string task) {
     auto possibleTasks = [
-        "free":     ["free", "freemode", "f", "normal"],
+        "free":     ["free", "freemode", "f", "normal", "?"],
         "create":   ["create", "c", "insert", "append", "yank"],
-        "read":     ["read", "r", "retrieve", "see", "value", "what", "whatis"],
+        "read":     ["read", "r", "retrieve", "see", "list", "value", "whatis"],
         "update":   ["update", "u", "replace", "change"],
         "delete":   ["delete", "d", "suppress", "nuke", "prune"],
-        "help":     ["help", "h", "list", "tasks", "wtf", "?"],
+        "help":     ["help", "h", "tasks", "wtf"],
         "quit":     ["quit", "q", "exit", "terminate", "bye"]
     ];
 
@@ -228,7 +237,6 @@ void validateFile(ref FileInfo loadedFileInfo, ref FileHandler fileHandler) {
 string isUserInputNumeric(char[] input) {
     if (std.string.isNumeric(to!string(input))) {
         int numInput = to!int(input);
-        writeln(numInput);
         if (numInput < 0) {
             return "NEG";
         } else if (numInput == 0) {
@@ -271,14 +279,19 @@ ulong forceUintInput(bool zeroAllowed = false) {
     return to!ulong(buf);
 }
 
-void read(ref FileInfo loadedFileInfo, ref FileHandler fileHandler) {
+ulong[2] askDataPos(
+        const string literal_task,
+        ref string[] affectedRow,
+        ref FileInfo loadedFileInfo,
+        ref FileHandler fileHandler
+) {
     // TODO: Allow the user to enter keywords instead of numbers, such as
     //  "first", "last", etc
     // I can sense the sweet, harrowing presence of feature creep getting closer
-    ulong rowId, cellId = 0;
-    string[] rowToRead = [];
+    ulong rowId, cellId;
+    string taskTag = "<" ~ std.string.capitalize(literal_task) ~ ">";
 
-    write("<Read> Please enter the row number to look up.\n> ");
+    write("\n" ~ taskTag ~ " Please enter the row number to perform the task on.\n> ");
     RowIdInput:
     rowId = forceUintInput();
 
@@ -288,12 +301,13 @@ void read(ref FileInfo loadedFileInfo, ref FileHandler fileHandler) {
         );
         goto RowIdInput;
     } else {
-        rowToRead = fileHandler.fileContents[rowId - 1];
+        affectedRow = fileHandler.fileContents[rowId - 1];
     }
 
-    write("\n<Read> Please enter the cell position to look up.\n"
-        ~ "Enter zero to display the whole row.\n> "
+    write("\n" ~ taskTag ~ " Please enter the cell position to look up.\n"
+        ~ "Enter zero to interact with the whole row.\n> "
     );
+
     CellIdInput:
     cellId = forceUintInput(true);
 
@@ -304,6 +318,29 @@ void read(ref FileInfo loadedFileInfo, ref FileHandler fileHandler) {
         goto CellIdInput;
     }
 
+    // If the second field's value is zero, it means the whole row will be
+    //  affected by the ongoing task
+    return [rowId, cellId];
+}
+
+void read(
+    ref FileInfo loadedFileInfo,
+    ref FileHandler fileHandler,
+    ulong rowId = 0,
+    ulong cellId = 0,
+    bool dataPosMustBeFetched = true,
+    string[] rowToRead = []
+) {
+    if (dataPosMustBeFetched) {
+        ulong[2] dataPos = askDataPos("read", rowToRead, loadedFileInfo, fileHandler);
+        rowId = dataPos[0];
+        cellId = dataPos[1];
+    }
+
+    write("\nDisplaying contents of row " ~ to!string(rowId));
+    if (cellId > 0)
+        write(", cell " ~ to!string(cellId));
+    write(":\n ");
     
     if (cellId == 0) {
         ulong cellCount = 0;
@@ -320,12 +357,70 @@ void read(ref FileInfo loadedFileInfo, ref FileHandler fileHandler) {
     writeln("<Read> Done.");
 }
 
+// Input validation step only atm
+void update(ref FileInfo loadedFileInfo, ref FileHandler fileHandler, bool readFirst = true) {
+    ulong rowId, cellId = 0;
+    string[] rowToUpdate = [];
+    char[] buf_newValue;
+    string[] newValue;
+
+    ulong[2] dataPos = askDataPos("update", rowToUpdate, loadedFileInfo, fileHandler);
+    rowId = dataPos[0];
+    cellId = dataPos[1];
+
+    // TODO: Give the user an option to skip this
+    // I should introduce task options after the contest, but this is going to
+    //  demand quite the refactoring
+    if (readFirst) {
+        writeln("Transitioning to read mode.");
+        read(loadedFileInfo, fileHandler, rowId, cellId, false, rowToUpdate);
+        writeln("Reverting to update mode.");
+    }
+
+    InputNewValue:
+    write("\nPlease enter the new value for this ");
+    write((cellId == 0 ? "row" : "cell") ~ ".\n> ");
+    readln(buf_newValue);
+
+    string cleanedUpInput = std.string.chomp(to!string(buf_newValue));
+    if (cleanedUpInput == "") {
+        writeln("[INFO] You gave an empty input."
+            ~ "\n>>>>>> Aborting edit."
+        );
+        return;
+    }
+
+    newValue = std.string.split(cleanedUpInput, ",");
+
+    if (cellId > 0) {
+        if (newValue.length > 1) {
+            write("\n[WARN] You have provided more than one comma-separated-value, but only one cell is being edited."
+                ~ "\n       Please input a single value, or enter nothing to abort the edit."
+            );
+            goto InputNewValue;
+        }
+    } else {
+        if (newValue.length != loadedFileInfo.cellsPerRow) {
+            write("\n[WARN] The number of values you provided ("
+                ~ to!string(newValue.length) ~ ") does not match the document's cells-per-row count."
+                ~ "\n       Please input a list of exactly " ~ to!string(loadedFileInfo.cellsPerRow)
+                ~ " values, separated by commas."
+                ~ "\n       Caution: You may enter an empty line, but that will abort the edit."
+            );
+            goto InputNewValue;
+        }
+    }
+
+    fileHandler.dataAltered = true;
+}
+
 string queryUserForTask(ref string task) {
     char[] buf_taskQuery;
 
     while (task == "free") {
         write("\nPlease select a task to perform.\n"
-            ~ "Type \"h\" or one of its aliases for help. \n> "
+            ~ "Type \"h\" or one of its aliases for help. \n"
+            ~ "Type \"q\" or one of its aliases to quit. \n> "
         );
         readln(buf_taskQuery);
         task = std.string.chomp(to!string(buf_taskQuery));
@@ -342,8 +437,6 @@ string queryUserForTask(ref string task) {
 // This function should be reached only after the args provided by the user,
 //  aswell as the CSV file itself, have been validated.
 void performTask(ref string task, ref FileInfo loadedFileInfo, ref FileHandler fileHandler) {
-    //writeln("\nOperation selected: " ~ std.string.capitalize(task) ~ ".");
-
     TaskSwitch:
     switch (task) {
         // -=-=- Special tasks -=-=-
@@ -359,6 +452,7 @@ void performTask(ref string task, ref FileInfo loadedFileInfo, ref FileHandler f
             goto default;
         // -=-=- For cells -=-=-
         case "update":
+            update(loadedFileInfo, fileHandler);
             goto default;
         // -=-=- For both rows and cells -=-=-
         case "read":
