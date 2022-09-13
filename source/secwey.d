@@ -31,12 +31,40 @@ import
     std.stdio,
     std.regex,
     std.getopt,
+    std.random,
+    std.datetime,
     std.algorithm,
     core.stdc.stdlib; // for exit()
 
 static import
     std.string, // to avoid confusion with std.algorithm's strip()
     std.ascii;
+
+void displayHelp() {
+    writeln("\n"
+        ~ "@-=-=--==-=-=-=-=-=-=-=-=-=-=-=-=-@\n"
+        ~ "|    List of secway's commands    |\n"
+        ~ "H                                 H\n"
+        ~ "| f - free                        |\n"
+        ~ "H   The default mode. Leads to    H\n"
+        ~ "|   the input of another task.    |\n"
+        ~ "H c - create                      H\n"
+        ~ "|   To be implemented.            |\n"
+        ~ "H r - read                        H\n"
+        ~ "|   Displays the contents of a    |\n"
+        ~ "H   cell or row without touching  H\n"
+        ~ "|   any data in the file buffer.  |\n"
+        ~ "H u - update                      H\n"
+        ~ "|   To be implemented.            |\n"
+        ~ "H d - delete                      H\n"
+        ~ "|   To be implemented.            |\n"
+        ~ "H h - help                        H\n"
+        ~ "|   Displays this message.        |\n"
+        ~ "H q - quit                        H\n"
+        ~ "|   Exits secway.                 |\n"
+        ~ "@-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-@"
+    );
+}
 
 struct FileHandler {
     // [row][cell]
@@ -99,17 +127,40 @@ struct FileInfo {
     bool headerInFile   = false;
 }
 
-// Validates arguments provided on program execution
-void validateArgs(string[] args, ref FileInfo loadedFileInfo, ref string task) {
+string validateTask(ref string task) {
     auto possibleTasks = [
-        // Nope. Not yet. Maybe I'll do this later.
-        // "free":  ["free", "freemode", "f", "normal", "?"],
+        "free":     ["free", "freemode", "f", "normal"],
         "create":   ["create", "c", "insert", "append", "yank"],
         "read":     ["read", "r", "retrieve", "see", "value", "what", "whatis"],
         "update":   ["update", "u", "replace", "change"],
-        "delete":   ["delete", "d", "suppress", "nuke", "prune"]
+        "delete":   ["delete", "d", "suppress", "nuke", "prune"],
+        "help":     ["help", "h", "list", "tasks", "wtf", "?"],
+        "quit":     ["quit", "q", "exit", "terminate", "bye"]
     ];
 
+    bool taskIsValid = false;
+    foreach (taskAliasCur, taskAliasGroup; possibleTasks) {
+        if (taskAliasGroup.canFind(task)) {
+            taskIsValid = true;
+            // Transform the alias into the proper internal task name
+            task = taskAliasCur;
+            break;
+        }
+    }
+
+    if (!taskIsValid) {
+        writeln("[WARN] Provided task argument is "
+            ~ (task == "" ? "empty" : "invalid") ~ "." 
+            ~ "\n>>>>>> Reverting secway to free mode."
+        );
+        task = "free";
+    }
+
+    return task;
+}
+
+// Validates arguments provided on program execution
+void validateArgs(string[] args, ref FileInfo loadedFileInfo, ref string task) {
     auto headerArgValues = [
         "yes":  ["yes", "y", "true", "yeah", "aye", "oui"],
         "no":   ["no", "n", "false", "nope", "nah", "non"]
@@ -140,23 +191,7 @@ void validateArgs(string[] args, ref FileInfo loadedFileInfo, ref string task) {
         "header", &headerArg
     );
     
-    bool taskIsValid = false;
-    foreach (taskAliasCur, taskAliasGroup; possibleTasks) {
-        if (taskAliasGroup.canFind(task)) {
-            taskIsValid = true;
-            // Transform the alias into the proper internal task name
-            task = taskAliasCur;
-            break;
-        }
-    }
-
-    if (!taskIsValid) {
-        writeln("[WARN] Provided task argument is "
-            ~ (task == "" ? "empty" : "invalid") ~ "." 
-            ~ "\n>>>>>> Reverting secway to read mode."
-        );
-        task = "read";
-    }
+    task = validateTask(task);
 
     if (headerArg == "") {
         writeln("[INFO] No header argument provided."
@@ -243,7 +278,7 @@ void read(ref FileInfo loadedFileInfo, ref FileHandler fileHandler) {
     ulong rowId, cellId = 0;
     string[] rowToRead = [];
 
-    write("Please enter the row number to look up.\n> ");
+    write("<Read> Please enter the row number to look up.\n> ");
     RowIdInput:
     rowId = forceUintInput();
 
@@ -256,7 +291,7 @@ void read(ref FileInfo loadedFileInfo, ref FileHandler fileHandler) {
         rowToRead = fileHandler.fileContents[rowId - 1];
     }
 
-    write("\nPlease enter the cell position to look up.\n"
+    write("\n<Read> Please enter the cell position to look up.\n"
         ~ "Enter zero to display the whole row.\n> "
     );
     CellIdInput:
@@ -281,13 +316,42 @@ void read(ref FileInfo loadedFileInfo, ref FileHandler fileHandler) {
     } else {
         writeln(std.string.strip(rowToRead[cellId - 1]));
     }
+
+    writeln("<Read> Done.");
 }
 
-void performTask(string task, ref FileInfo loadedFileInfo, ref FileHandler fileHandler) {
-    // TODO: Allow user to follow up with another task after one is done
-    writeln("\nOperation selected: " ~ std.string.capitalize(task) ~ ".");
+string queryUserForTask(ref string task) {
+    char[] buf_taskQuery;
 
+    while (task == "free") {
+        write("\nPlease select a task to perform.\n"
+            ~ "Type \"h\" or one of its aliases for help. \n> "
+        );
+        readln(buf_taskQuery);
+        task = std.string.chomp(to!string(buf_taskQuery));
+        task = validateTask(task);
+
+        if (task == "free") {
+            writeln("I am already in free mode.");
+        }
+    }
+
+    return task;
+}
+
+// This function should be reached only after the args provided by the user,
+//  aswell as the CSV file itself, have been validated.
+void performTask(ref string task, ref FileInfo loadedFileInfo, ref FileHandler fileHandler) {
+    //writeln("\nOperation selected: " ~ std.string.capitalize(task) ~ ".");
+
+    TaskSwitch:
     switch (task) {
+        // -=-=- Special tasks -=-=-
+        case "free":
+            goto default;
+        case "help":
+            displayHelp();
+            goto default;
         // -=-=- For rows -=-=-
         case "create":
             goto default;
@@ -301,7 +365,14 @@ void performTask(string task, ref FileInfo loadedFileInfo, ref FileHandler fileH
             read(loadedFileInfo, fileHandler);
             goto default;
         default:
-            break;
+            if (task == "quit") {
+                writeln("Exiting...");
+                break;
+            } else {
+                task = "free";
+                task = queryUserForTask(task);
+                goto TaskSwitch;
+            }
     }
 }
 
@@ -311,6 +382,14 @@ void main(string[] args) {
     auto fileHandler = new FileHandler;
 
 	validateArgs(args, *loadedFileInfo, task);
+    // If this is triggered, that means the user specified quitting the program
+    //  as an initial task. Which is a bit pointless.
+    if (task == "quit") {
+        writeln("[WHY?] You jumpstart me just to make me quit immediately?"
+            ~ "\n       Dude. Uncool. Exiting..."
+        );
+        exit(1);
+    }
     validateFile(*loadedFileInfo, *fileHandler);
     performTask(task, *loadedFileInfo, *fileHandler);
 }
