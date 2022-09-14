@@ -61,7 +61,7 @@ void displayHelp() {
         ~ "H   cell or row. Also executes    H\n"
         ~ "|   the read task by default.     |\n"
         ~ "H d - delete                      H\n"
-        ~ "|   To be implemented.            |\n"
+        ~ "|   Deletes one row or column.    |\n"
         ~ "H s - save                        H\n"
         ~ "|   Greenlights the writing of    |\n"
         ~ "H   altered data inside a new or  H\n"
@@ -289,6 +289,7 @@ ulong forceUintInput(bool zeroAllowed = false) {
     return to!ulong(buf);
 }
 
+// Returns the coordinates of a cell or row based on user input
 ulong[2] askDataPos(
         const string literal_task,
         ref string[] affectedRow,
@@ -306,7 +307,8 @@ ulong[2] askDataPos(
     rowId = forceUintInput();
 
     if (rowId > fileHandler.fileContents.length) {
-        writeln("[WARN] The row number you provided exceeds the actual number of rows in the file."
+        writeln("[WARN] The row number you provided exceeds the actual number of rows in the file ("
+            ~ to!string(loadedFileInfo.rowCount) ~ ")."
             ~ "\n       Please input a valid row number.\n> "
         );
         goto RowIdInput;
@@ -322,7 +324,8 @@ ulong[2] askDataPos(
     cellId = forceUintInput(true);
 
     if (cellId > fileHandler.fileContents[rowId - 1].length) {
-        write("[WARN] The cell number you provided exceeds the actual number of cells in the row you selected."
+        write("[WARN] The cell number you provided exceeds the actual number of cells in the row ("
+            ~ to!string(loadedFileInfo.cellsPerRow) ~ ")."
             ~ "\n       Please input a valid cell number.\n> "
         );
         goto CellIdInput;
@@ -489,6 +492,7 @@ void update(ref FileInfo loadedFileInfo, ref FileHandler fileHandler, bool readF
     // Caution: The changes are not automatically saved. The user must query the
     //  "save" task in order to write the altered data into a new file.
     fileHandler.dataAltered = true;
+
     writeln("<Update> Data modified.");
 }
 
@@ -607,7 +611,99 @@ void create(ref FileInfo loadedFileInfo, ref FileHandler fileHandler) {
         }
     }
 
+    fileHandler.dataAltered = true;
+
     writeln("<Create> Data appended.");
+}
+
+// "delete" is a reserved keyword in Dlang, so I gave that func a longer name
+void deleteData(ref FileInfo loadedFileInfo, ref FileHandler fileHandler, bool readFirst = true) {
+    ulong rowId, cellId, colId = 0;
+    string rowOrColumn;
+    char[] buf_rowOrColumn, buf_confirmDeletion;
+
+    write("\n<Delete> Would you like to delete a row, or a column? (r/c)\n> ");
+    AskForRowOrCol:
+    readln(buf_rowOrColumn);
+    switch (std.ascii.toLower(buf_rowOrColumn[0])) {
+        case 'r':
+            rowOrColumn = "row";
+            break;
+        case 'c':
+            rowOrColumn = "column";
+            break;
+        default:
+            write("\n<Delete> Please input either \"r\" to delete a row, or \"c\" to delete a column.\n> ");
+            goto AskForRowOrCol;
+    }
+
+    // Asks the user for the data to prune, and prints the data in question
+    if (rowOrColumn == "row") {
+        DeleteRow:
+        write("\n<Delete> Please input the position of the row you would like to delete.\n"
+            ~ "Caution: The header row cannot be deleted, so beware of the plus-one offset.\n> "
+        );
+        rowId = forceUintInput();
+
+        if (loadedFileInfo.headerInFile && rowId == 1) {
+            writeln("[WARN] Cannot delete the header row. Please input a higher row position value.");
+            goto DeleteRow;
+        }
+
+        // TODO: Give the user an option to skip this
+        // I should introduce task arguments after the contest, but this is going to
+        //  demand quite the refactoring
+        if (readFirst) {
+            writeln("Transitioning to read mode.");
+            read(loadedFileInfo, fileHandler, rowId, 0, false, fileHandler.fileContents[rowId]);
+            writeln("Reverting to delete mode.");
+        }
+    } else {
+        // TODO: Column deletion does not work yet. I'll have to fix it.
+        // Thrown error: "range is smaller than amount of items to pop".
+        DeleteCol:
+        write("\n<Delete> Please input the position of the column you would like to delete.\n> ");
+        colId = forceUintInput();
+
+        if (colId > loadedFileInfo.cellsPerRow) {
+            write("\n[WARN] The column id you provided ("
+                ~ to!string(colId) ~ ") does not match the document's cells-per-row count."
+                ~ "\n       Please input a value between 1 and "
+                ~ to!string(loadedFileInfo.cellsPerRow) ~ ".\n"
+            );
+            goto DeleteCol;
+        }
+
+        writeln("<Delete> Column number "
+            ~ to!string(colId)
+            ~ (loadedFileInfo.headerInFile ? (" with header value " ~ fileHandler.fileContents[0][colId - 1] ~ " ") : " ")
+            ~ "selected."
+        );
+    }
+
+    write("\n<Delete> Confirm data deletion? (y/n)\n"
+        ~ "Entering anything other than \"y\" will default to \"n\".\n> "
+    );
+    readln(buf_confirmDeletion);
+    if (std.ascii.toLower(buf_confirmDeletion[0]) != 'y') {
+        writeln("<Delete> Aborting deletion.");
+        return;
+    }
+
+    // Data-deletion step
+    if (rowOrColumn == "row") {
+        remove(fileHandler.fileContents, rowId);
+        fileHandler.fileContents.length--;
+    } else {
+        for (int loopRowId = 0; loopRowId < loadedFileInfo.rowCount; loopRowId++) {
+            remove(fileHandler.fileContents[loopRowId], colId);
+            fileHandler.fileContents[loopRowId].length--;
+        }
+    }
+
+    fileHandler.dataAltered = true;
+
+    writeln("<Delete> Data deletion completed.");
 }
 
 string queryUserForTask(ref string task) {
@@ -651,6 +747,7 @@ void performTask(ref string task, ref FileInfo loadedFileInfo, ref FileHandler f
             create(loadedFileInfo, fileHandler);
             goto default;
         case "delete":
+            deleteData(loadedFileInfo, fileHandler);
             goto default;
         // -=-=- For cells -=-=-
         case "update":
