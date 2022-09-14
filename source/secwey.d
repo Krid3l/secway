@@ -29,6 +29,7 @@ module secwey;
 import
     std.file,
     std.conv,
+    std.path,
     std.stdio,
     std.regex,
     std.getopt,
@@ -112,7 +113,8 @@ struct FileHandler {
             }
             // Sweep the row's cells into the newly-created 2nd-level array slot
             foreach (cellIndex, cellContent; cellsFromRow) {
-                fileContents[lineNumber] ~= to!string(cellContent);
+                // secway does not yet preserve the spaces included in the file.
+                fileContents[lineNumber] ~= to!string(std.string.strip(cellContent));
                 loadedFileInfo.cellCount++;
                 loadedFileInfo.charCount += cellContent.length;
             }
@@ -357,6 +359,62 @@ void read(
     writeln("<Read> Done.");
 }
 
+void writeCSVFile(ref FileInfo loadedFileInfo, ref FileHandler fileHandler) {
+    char[] buf_askForDupFile, buf_dupFileName;
+    string fileToWriteTo = "";
+
+    // Just in case...
+    if (!fileHandler.dataAltered) {
+        writeln("[WARN] Secway got to its file-writing step, but fileHandler.dataAltered is false.\n"
+            ~ "       Something's not right..."
+        );
+    }
+
+    write("\nWould you like to save the modified contents in a duplicate file "
+        ~ "instead of overwriting the original (" ~ loadedFileInfo.filename ~ ")? (y/n)\n"
+        ~ "Entering anything other than \"n\" will default to \"y\".\n> "
+    );
+    readln(buf_askForDupFile);
+
+    if (std.ascii.toLower(buf_askForDupFile[0]) == 'n') {
+        fileToWriteTo = loadedFileInfo.filename;
+    } else {
+        string baseFileName = baseName(loadedFileInfo.filename, ".csv");
+        string unixTimeStamp = to!string((Clock.currTime()).toUnixTime);
+        fileToWriteTo = baseFileName ~ unixTimeStamp ~ ".csv";
+        write("\nPlease enter the complete name of the new file.\n"
+            ~ "(Defaults to " ~ fileToWriteTo ~ " if the input is empty).\n"
+            ~ "Caution: You may enter anything here, even a file with an "
+            ~ "extension other than .csv; proceed carefully.\n> "
+        );
+        readln(buf_dupFileName);
+        string cleanedUpFileNameInput = std.string.chomp(to!string(buf_dupFileName));
+        if (cleanedUpFileNameInput != "") {
+            fileToWriteTo = cleanedUpFileNameInput;
+        }
+    }
+
+    File destFile = File(fileToWriteTo, "w+");
+    ulong fileLnCursor = 0;
+    string buf_lineContents = "";
+    string[] rowToWrite;
+    while (fileLnCursor < fileHandler.fileContents.length) {
+        buf_lineContents = "";
+        rowToWrite = fileHandler.fileContents[fileLnCursor];
+        foreach (cellCur, cellValue; fileHandler.fileContents[fileLnCursor]) {
+            buf_lineContents ~= cellValue;
+            if ((cellCur + 1) < rowToWrite.length) {
+                buf_lineContents ~= ",";
+            }
+        }
+        destFile.writeln(buf_lineContents);
+        fileLnCursor++;
+    }
+
+    destFile.close();
+    writeln("File write complete.");
+}
+
 // Input validation step only atm
 void update(ref FileInfo loadedFileInfo, ref FileHandler fileHandler, bool readFirst = true) {
     ulong rowId, cellId = 0;
@@ -369,7 +427,7 @@ void update(ref FileInfo loadedFileInfo, ref FileHandler fileHandler, bool readF
     cellId = dataPos[1];
 
     // TODO: Give the user an option to skip this
-    // I should introduce task options after the contest, but this is going to
+    // I should introduce task arguments after the contest, but this is going to
     //  demand quite the refactoring
     if (readFirst) {
         writeln("Transitioning to read mode.");
@@ -378,7 +436,7 @@ void update(ref FileInfo loadedFileInfo, ref FileHandler fileHandler, bool readF
     }
 
     InputNewValue:
-    write("\nPlease enter the new value for this ");
+    write("\n<Update> Please enter the new value for this ");
     write((cellId == 0 ? "row" : "cell") ~ ".\n> ");
     readln(buf_newValue);
 
@@ -398,6 +456,8 @@ void update(ref FileInfo loadedFileInfo, ref FileHandler fileHandler, bool readF
                 ~ "\n       Please input a single value, or enter nothing to abort the edit."
             );
             goto InputNewValue;
+        } else {
+            fileHandler.fileContents[rowId - 1][cellId - 1] = newValue[0]; 
         }
     } else {
         if (newValue.length != loadedFileInfo.cellsPerRow) {
@@ -408,10 +468,16 @@ void update(ref FileInfo loadedFileInfo, ref FileHandler fileHandler, bool readF
                 ~ "\n       Caution: You may enter an empty line, but that will abort the edit."
             );
             goto InputNewValue;
+        } else {
+            foreach (newCellId, newCellValue; newValue) {
+                fileHandler.fileContents[rowId - 1][newCellId] = newCellValue;
+            }
         }
     }
 
     fileHandler.dataAltered = true;
+    writeln("<Update> Data modified.");
+    writeCSVFile(loadedFileInfo, fileHandler);
 }
 
 string queryUserForTask(ref string task) {
