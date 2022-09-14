@@ -51,15 +51,21 @@ void displayHelp() {
         ~ "H   The default mode. Leads to    H\n"
         ~ "|   the input of another task.    |\n"
         ~ "H c - create                      H\n"
-        ~ "|   To be implemented.            |\n"
+        ~ "|   Appends a new row or column.  |\n"
         ~ "H r - read                        H\n"
         ~ "|   Displays the contents of a    |\n"
         ~ "H   cell or row without altering  H\n"
         ~ "|   any data in the file buffer.  |\n"
         ~ "H u - update                      H\n"
-        ~ "|   To be implemented.            |\n"
+        ~ "|   Changes the contents of a     |\n"
+        ~ "H   cell or row. Also executes    H\n"
+        ~ "|   the read task by default.     |\n"
         ~ "H d - delete                      H\n"
         ~ "|   To be implemented.            |\n"
+        ~ "H s - save                        H\n"
+        ~ "|   Greenlights the writing of    |\n"
+        ~ "H   altered data inside a new or  H\n"
+        ~ "|   existing file.                |\n"
         ~ "H h - help                        H\n"
         ~ "|   Displays this message.        |\n"
         ~ "H q - quit                        H\n"
@@ -72,6 +78,7 @@ struct FileHandler {
     // [row][cell]
     string[][] fileContents;
     bool dataAltered;
+    bool changesSaved = false;
 
     // That member function is a tad long. I should delocalize pieces of it at
     //  program scope; that would allow to better track the control flow too.
@@ -145,6 +152,7 @@ string validateTask(ref string task) {
         "read":     ["read", "r", "retrieve", "see", "list", "value", "whatis"],
         "update":   ["update", "u", "replace", "change"],
         "delete":   ["delete", "d", "suppress", "nuke", "prune"],
+        "save":     ["save", "s", "write"],
         "help":     ["help", "h", "tasks", "wtf"],
         "quit":     ["quit", "q", "exit", "terminate", "bye"]
     ];
@@ -342,6 +350,8 @@ void read(
     write("\nDisplaying contents of row " ~ to!string(rowId));
     if (cellId > 0)
         write(", cell " ~ to!string(cellId));
+    if (loadedFileInfo.headerInFile)
+        write(" (Column header: " ~ fileHandler.fileContents[0][cellId] ~ ")");
     write(":\n ");
     
     if (cellId == 0) {
@@ -384,8 +394,8 @@ void writeCSVFile(ref FileInfo loadedFileInfo, ref FileHandler fileHandler) {
         fileToWriteTo = baseFileName ~ unixTimeStamp ~ ".csv";
         write("\nPlease enter the complete name of the new file.\n"
             ~ "(Defaults to " ~ fileToWriteTo ~ " if the input is empty).\n"
-            ~ "Caution: You may enter anything here, even a file with an "
-            ~ "extension other than .csv; proceed carefully.\n> "
+            ~ "Caution: Entering a file name with an extension other than"
+            ~ " .csv is allowed; proceed carefully.\n> "
         );
         readln(buf_dupFileName);
         string cleanedUpFileNameInput = std.string.chomp(to!string(buf_dupFileName));
@@ -412,6 +422,7 @@ void writeCSVFile(ref FileInfo loadedFileInfo, ref FileHandler fileHandler) {
     }
 
     destFile.close();
+    fileHandler.changesSaved = true;
     writeln("File write complete.");
 }
 
@@ -440,7 +451,7 @@ void update(ref FileInfo loadedFileInfo, ref FileHandler fileHandler, bool readF
     write((cellId == 0 ? "row" : "cell") ~ ".\n> ");
     readln(buf_newValue);
 
-    string cleanedUpInput = std.string.chomp(to!string(buf_newValue));
+    string cleanedUpInput = std.string.strip(std.string.chomp(to!string(buf_newValue)));
     if (cleanedUpInput == "") {
         writeln("[INFO] You gave an empty input."
             ~ "\n>>>>>> Aborting edit."
@@ -475,9 +486,128 @@ void update(ref FileInfo loadedFileInfo, ref FileHandler fileHandler, bool readF
         }
     }
 
+    // Caution: The changes are not automatically saved. The user must query the
+    //  "save" task in order to write the altered data into a new file.
     fileHandler.dataAltered = true;
     writeln("<Update> Data modified.");
-    writeCSVFile(loadedFileInfo, fileHandler);
+}
+
+// Only supports appending data for now
+// TODO: Allow user to insert rows or columns in-between existing ones
+void create(ref FileInfo loadedFileInfo, ref FileHandler fileHandler) {
+    char[] buf_rowOrColumn, buf_dataToAppend;
+    string rowOrColumn;
+    string[] dataToAppend;
+    // For column insertion specifically:
+    ulong expectedRowCount = 0; 
+    char[] buf_newHeader;
+    string cleanedUpHeader;
+
+    write("\n<Create> Would you like to append a row, or a column? (r/c)\n> ");
+    InputNewData:
+    readln(buf_rowOrColumn);
+    switch (std.ascii.toLower(buf_rowOrColumn[0])) {
+        case 'r':
+            rowOrColumn = "row";
+            break;
+        case 'c':
+            rowOrColumn = "column";
+            break;
+        default:
+            write("\n<Create> Please input either \"r\" to append a row, or \"c\" to append a column.\n> ");
+            goto InputNewData;
+    }
+
+    // That chunk of code is awfully similar to update()'s row manipulation
+    // I should move that in a separate function later
+    if (rowOrColumn == "row") {
+        InputNewRow:
+        write("\n<Create> Please enter the new value for this row:\n> ");
+        readln(buf_dataToAppend);
+        string cleanedUpInput = std.string.strip(std.string.chomp(to!string(buf_dataToAppend)));
+        if (cleanedUpInput == "") {
+            writeln("[INFO] You gave an empty input."
+                ~ "\n>>>>>> Aborting data creation."
+            );
+            return;
+        }
+
+        dataToAppend = std.string.split(cleanedUpInput, ",");
+
+        if (dataToAppend.length != loadedFileInfo.cellsPerRow) {
+            write("\n[WARN] The number of values you provided ("
+                ~ to!string(dataToAppend.length) ~ ") does not match the document's cells-per-row count."
+                ~ "\n       Please input a list of exactly " ~ to!string(loadedFileInfo.cellsPerRow)
+                ~ " values, separated by commas."
+                ~ "\n       Caution: You may enter an empty line, but that will abort the edit."
+            );
+            goto InputNewRow;
+        } else {
+            fileHandler.fileContents.length++;
+            foreach (newCellId, newCellValue; dataToAppend) {
+                fileHandler.fileContents[$ - 1].length++;
+                fileHandler.fileContents[$ - 1][newCellId] ~= newCellValue;
+            }
+        }
+    } else {
+        InputNewColumn:
+        if (loadedFileInfo.headerInFile && cleanedUpHeader == "") {
+            write("\n<Create> Please enter the header value for the new column:\n> ");
+            readln(buf_newHeader);
+            cleanedUpHeader = std.string.strip(std.string.chomp(to!string(buf_newHeader)));
+            if (cleanedUpHeader == "") {
+                writeln("[INFO] You gave an empty input.");
+                goto InputNewColumn;
+            }
+            expectedRowCount = loadedFileInfo.rowCount - 1;
+        }
+
+        if (!loadedFileInfo.headerInFile) {
+            expectedRowCount = loadedFileInfo.rowCount;
+        }
+
+        write("\n<Create> Please enter the contents of the new column"
+            ~ (cleanedUpHeader != "" ? " with header value \"" ~ cleanedUpHeader ~ "\".\n" : ".\n")
+            ~ "         Each cell must be separated by commas.\n> "
+        );
+        readln(buf_dataToAppend);
+        string cleanedUpInput = std.string.strip(std.string.chomp(to!string(buf_dataToAppend)));
+        if (cleanedUpInput == "") {
+            writeln("[INFO] You gave an empty input.");
+            goto InputNewColumn;
+        }
+
+        dataToAppend = std.string.split(cleanedUpInput, ",");
+
+        if (dataToAppend.length != expectedRowCount) {
+            write("\n[WARN] The number of values you provided ("
+                ~ to!string(dataToAppend.length) ~ ") does not match the document's row count"
+                ~ (loadedFileInfo.headerInFile ? " (header row excluded)." : ".")
+                ~ "\n       Please input a list of exactly " ~ to!string(expectedRowCount)
+                ~ " values, separated by commas."
+                ~ "\n       Caution: You may enter an empty line, but that will abort the edit."
+            );
+            goto InputNewColumn;
+        } else {
+            if (cleanedUpHeader != "") {
+                // The new column contains a header
+                fileHandler.fileContents[0].length++;
+                fileHandler.fileContents[0][$ - 1] ~= cleanedUpHeader;
+                foreach (rowId, newCellValue; dataToAppend) {
+                    fileHandler.fileContents[rowId + 1].length++;
+                    fileHandler.fileContents[rowId + 1][$ - 1] ~= newCellValue;
+                }
+            } else {
+                // The new column has no header
+                foreach (rowId, newCellValue; dataToAppend) {
+                    fileHandler.fileContents[rowId].length++;
+                    fileHandler.fileContents[rowId][$ - 1] ~= newCellValue;
+                }
+            }
+        }
+    }
+
+    writeln("<Create> Data appended.");
 }
 
 string queryUserForTask(ref string task) {
@@ -503,6 +633,8 @@ string queryUserForTask(ref string task) {
 // This function should be reached only after the args provided by the user,
 //  aswell as the CSV file itself, have been validated.
 void performTask(ref string task, ref FileInfo loadedFileInfo, ref FileHandler fileHandler) {
+    char[] buf_confirmQuitAfterChanges;
+
     TaskSwitch:
     switch (task) {
         // -=-=- Special tasks -=-=-
@@ -511,8 +643,12 @@ void performTask(ref string task, ref FileInfo loadedFileInfo, ref FileHandler f
         case "help":
             displayHelp();
             goto default;
+        case "save":
+            writeCSVFile(loadedFileInfo, fileHandler);
+            goto default;
         // -=-=- For rows -=-=-
         case "create":
+            create(loadedFileInfo, fileHandler);
             goto default;
         case "delete":
             goto default;
@@ -526,6 +662,16 @@ void performTask(ref string task, ref FileInfo loadedFileInfo, ref FileHandler f
             goto default;
         default:
             if (task == "quit") {
+                if (fileHandler.dataAltered && !fileHandler.changesSaved) {
+                    write("\n[WARN] You have altered data in the buffer, but the changes have not been saved.\n"
+                        ~ "       Are you sure you want to exit? (y/n)\n"
+                        ~ "       Entering anything other than \"n\" will default to \"y\".\n> "
+                    );
+                    readln(buf_confirmQuitAfterChanges);
+                    if (std.ascii.toLower(buf_confirmQuitAfterChanges[0]) == 'n') {
+                        goto case "save";
+                    }
+                }
                 writeln("Exiting...");
                 break;
             } else {
@@ -549,6 +695,12 @@ void main(string[] args) {
             ~ "\n       Dude. Uncool. Exiting..."
         );
         exit(1);
+    }
+    if (task == "save") {
+        writeln("[OOPS] The save task has been assigned as my initial task."
+            ~ "\n       No data has yet been modified. Falling back on free mode..."
+        );
+        task = "free";
     }
     validateFile(*loadedFileInfo, *fileHandler);
     performTask(task, *loadedFileInfo, *fileHandler);
