@@ -63,13 +63,15 @@ void displayHelp() {
         ~ "H d - delete                      H\n"
         ~ "|   Deletes one row or column.    |\n"
         ~ "H s - save                        H\n"
-        ~ "|   Greenlights the writing of    |\n"
-        ~ "H   altered data inside a new or  H\n"
-        ~ "|   existing file.                |\n"
+        ~ "|   Saves the altered data        |\n"
+        ~ "H   inside a new or existing      H\n"
+        ~ "|   file. Prompts for filename.   |\n"
         ~ "H h - help                        H\n"
         ~ "|   Displays this message.        |\n"
         ~ "H q - quit                        H\n"
-        ~ "|   Exits secway.                 |\n"
+        ~ "|   Exits secway. If the buffer   |\n"
+        ~ "H   has been modified, will ask   H\n"
+        ~ "|   if the changes must be saved. |\n"
         ~ "@-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-@"
     );
 }
@@ -239,6 +241,7 @@ void validateFile(ref FileInfo loadedFileInfo, ref FileHandler fileHandler) {
         ~ "\n* Cell count\n  " ~ to!string(loadedFileInfo.cellCount)
         ~ "\n* Row count\n  " ~ to!string(loadedFileInfo.rowCount)
         ~ "\n* Header row? (user-specified)\n  " ~ (loadedFileInfo.headerInFile ? "yes" : "no")
+        ~ "\n* Last modification\n  " ~ to!string(timeLastModified(loadedFileInfo.filename))
     );
 }
 
@@ -476,7 +479,7 @@ void update(ref FileInfo loadedFileInfo, ref FileHandler fileHandler, bool readF
     } else {
         if (newValue.length != loadedFileInfo.cellsPerRow) {
             write("\n[WARN] The number of values you provided ("
-                ~ to!string(newValue.length) ~ ") does not match the document's cells-per-row count."
+                ~ to!string(newValue.length) ~ ") does not match the document's cells-per-row (column) count."
                 ~ "\n       Please input a list of exactly " ~ to!string(loadedFileInfo.cellsPerRow)
                 ~ " values, separated by commas."
                 ~ "\n       Caution: You may enter an empty line, but that will abort the edit."
@@ -540,7 +543,7 @@ void create(ref FileInfo loadedFileInfo, ref FileHandler fileHandler) {
 
         if (dataToAppend.length != loadedFileInfo.cellsPerRow) {
             write("\n[WARN] The number of values you provided ("
-                ~ to!string(dataToAppend.length) ~ ") does not match the document's cells-per-row count."
+                ~ to!string(dataToAppend.length) ~ ") does not match the document's cells-per-row (column) count."
                 ~ "\n       Please input a list of exactly " ~ to!string(loadedFileInfo.cellsPerRow)
                 ~ " values, separated by commas."
                 ~ "\n       Caution: You may enter an empty line, but that will abort the edit."
@@ -667,7 +670,7 @@ void deleteData(ref FileInfo loadedFileInfo, ref FileHandler fileHandler, bool r
 
         if (colId > loadedFileInfo.cellsPerRow) {
             write("\n[WARN] The column id you provided ("
-                ~ to!string(colId) ~ ") does not match the document's cells-per-row count."
+                ~ to!string(colId) ~ ") does not match the document's cells-per-row (column) count."
                 ~ "\n       Please input a value between 1 and "
                 ~ to!string(loadedFileInfo.cellsPerRow) ~ ".\n"
             );
@@ -696,7 +699,7 @@ void deleteData(ref FileInfo loadedFileInfo, ref FileHandler fileHandler, bool r
         fileHandler.fileContents.length--;
     } else {
         for (int loopRowId = 0; loopRowId < loadedFileInfo.rowCount; loopRowId++) {
-            remove(fileHandler.fileContents[loopRowId], colId);
+            remove(fileHandler.fileContents[loopRowId], colId - 1);
             fileHandler.fileContents[loopRowId].length--;
         }
     }
@@ -761,15 +764,15 @@ void performTask(ref string task, ref FileInfo loadedFileInfo, ref FileHandler f
             if (task == "quit") {
                 if (fileHandler.dataAltered && !fileHandler.changesSaved) {
                     write("\n[WARN] You have altered data in the buffer, but the changes have not been saved.\n"
-                        ~ "       Are you sure you want to exit? (y/n)\n"
-                        ~ "       Entering anything other than \"n\" will default to \"y\".\n> "
+                        ~ "       Would you like to save before quitting? (y/n)\n"
+                        ~ "       Entering anything other than \"y\" will default to \"n\".\n> "
                     );
                     readln(buf_confirmQuitAfterChanges);
-                    if (std.ascii.toLower(buf_confirmQuitAfterChanges[0]) == 'n') {
+                    if (std.ascii.toLower(buf_confirmQuitAfterChanges[0]) == 'y') {
                         goto case "save";
                     }
                 }
-                writeln("Exiting...");
+                writeln("Exiting...\n");
                 break;
             } else {
                 task = "free";
